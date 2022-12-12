@@ -30,7 +30,6 @@ set( MODULE_LIBRARIES
   larsim::Utils
   sbnobj::Common_Reco
   nusimdata::SimulationBase
-  larsim::MCCheater_ParticleInventoryService_service
   ROOT::Geom
   ROOT::XMLIO
   ROOT::Gdml

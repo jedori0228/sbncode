@@ -35,7 +35,6 @@
 #include "lardataobj/RecoBase/OpHit.h"
 // #include "lardataobj/RecoBase/OpFlash.h"
 #include "larpandora/LArPandoraInterface/LArPandoraHelper.h"
-#include "larsim/MCCheater/ParticleInventoryService.h"
 #include "larsim/Utils/TruthMatchUtils.h"
 #include "nusimdata/SimulationBase/MCParticle.h"
 
@@ -44,7 +43,6 @@
 #include "TFile.h"
 #include "TH1.h"
 #include "TH2.h"
-#include "TProfile3D.h"
 
 #include "sbncode/OpT0Finder/flashmatch/Base/OpT0FinderTypes.h"
 #include "sbncode/OpDet/PDMapAlg.h"
@@ -81,55 +79,28 @@ public:
   void beginJob() override;
   void endJob() override;
 
-  // Variables loaded from the metrics file
-  struct ReferenceMetrics {
-    std::vector<double> dYMeans, dZMeans, RRMeans, RatioMeans,
-      SlopeMeans, PEToQMeans;
-    std::vector<double> dYSpreads, dZSpreads, RRSpreads, RatioSpreads,
-      SlopeSpreads, PEToQSpreads;
-    std::vector<double> PolCoeffsY, PolCoeffsZ;
-    struct Fits {
-      double min, max;
-      std::unique_ptr<TF1> f;
-    };
-    TH2D* RRH2; TH2D* RatioH2;
-    std::array<Fits, 3> RRFits; // LEGACY
-    std::array<Fits, 3> RatioFits; // LEGACY
-    TProfile3D* dYP3; TProfile3D* dZP3; TProfile3D* RRP3;
-    TProfile3D* RatioP3; TProfile3D* SlopeP3; TProfile3D* PEToQP3;
-  };
-
   struct ChargeDigest {
     size_t pId;
     int pfpPDGC;
     art::Ptr<recob::PFParticle> pfp_ptr;
     flashmatch::QCluster_t qClusters;
-    unsigned hitsInVolume;
+    std::set<unsigned> tpcWithHits;
     double mcT0 = -9999;
-    bool isNu = false;
     ChargeDigest() = default;
     ChargeDigest(const size_t pId_, const int pfpPDGC_,
                  const art::Ptr<recob::PFParticle>& pfp_ptr_,
                  const flashmatch::QCluster_t& qClusters_,
-                 const unsigned hitsInVolume_) :
+                 const std::set<unsigned>& tpcWithHits_) :
       pId(pId_), pfpPDGC(pfpPDGC_), pfp_ptr(pfp_ptr_),
-      qClusters(qClusters_), hitsInVolume(hitsInVolume_)
+      qClusters(qClusters_), tpcWithHits(tpcWithHits_)
       {}
     ChargeDigest(const size_t pId_, const int pfpPDGC_,
                  const art::Ptr<recob::PFParticle>& pfp_ptr_,
                  const flashmatch::QCluster_t& qClusters_,
-                 const unsigned hitsInVolume_,
+                 const std::set<unsigned>& tpcWithHits_,
                  const double mcT0_) :
       pId(pId_), pfpPDGC(pfpPDGC_), pfp_ptr(pfp_ptr_),
-      qClusters(qClusters_), hitsInVolume(hitsInVolume_), mcT0(mcT0_)
-      {}
-    ChargeDigest(const size_t pId_, const int pfpPDGC_,
-                 const art::Ptr<recob::PFParticle>& pfp_ptr_,
-                 const flashmatch::QCluster_t& qClusters_,
-                 const unsigned hitsInVolume_,
-                 const double mcT0_, bool isNu_) :
-      pId(pId_), pfpPDGC(pfpPDGC_), pfp_ptr(pfp_ptr_),
-      qClusters(qClusters_), hitsInVolume(hitsInVolume_), mcT0(mcT0_), isNu(isNu_)
+      qClusters(qClusters_), tpcWithHits(tpcWithHits_), mcT0(mcT0_)
       {}
   };
   using ChargeDigestMap = std::map<double, ChargeDigest, std::greater<double>>;
@@ -149,19 +120,11 @@ public:
   };
 
   struct ChargeMetrics {
-    unsigned id, activity;
-    int pdgc;
-    double x, x_gl, y, z;
-    double x_glw, yw, zw, slope, q;
+    double x, x_gl, y, z, q;
     bool metric_ok;
-    ChargeMetrics(unsigned id_, unsigned activity_, int pdgc_,
-                  double x_, double x_gl_, double y_, double z_,
-                  double x_glw_, double yw_, double zw_,
-                  double slope_, double q_, bool metric_ok_) :
-      id(id_), activity(activity_), pdgc(pdgc_),
-      x(x_), x_gl(x_gl_), y(y_), z(z_),
-      x_glw(x_glw_), yw(yw_), zw(zw_),
-      slope(slope_), q(q_), metric_ok(metric_ok_)
+    ChargeMetrics(double x_, double x_gl_, double y_, double z_,
+                  double q_, bool metric_ok_) :
+      x(x_), x_gl(x_gl_), y(y_), z(z_), q(q_), metric_ok(metric_ok_)
       {}
     // faulty charges constructor
     ChargeMetrics() : metric_ok(false) {}
@@ -169,80 +132,54 @@ public:
       {
         std::ostringstream stream;
         stream
-          << "  id:      " << id << "\n"
-          << "  activity:" << activity << "\n"
-          << "  pdgc:    " << pdgc << "\n"
           << "  x:       " << x << "\n"
           << "  x_gl:    " << x_gl << "\n"
           << "  y:       " << y << "\n"
           << "  z:       " << z << "\n"
-          << "  x_glw:   " << x_glw << "\n"
-          << "  yw:      " << yw << "\n"
-          << "  zw:      " << zw << "\n"
-          << "  slope:   " << slope << "\n"
           << "  q:       " << q << "\n"
-          << "  metric_ok: " << std::boolalpha << metric_ok << "\n";
+          << "  metric_ok: " << metric_ok << "\n";
         return stream.str();
       }
   };
 
   struct FlashMetrics {
-    unsigned id, activity;
-    double x, yb, zb;
-    double x_gl, y, z;
-    double xw, yw, zw;
-    double rr, ratio, slope, pe, unpe, time;
+    double x, x_gl, y, yb, z, zb;
+    double rr, pe, unpe, ratio, time;
     double h_x, h_xerr, h_xrr, h_xratio;
-    double y_skew, z_skew, y_kurt, z_kurt;
+    double y_skew, z_skew;
     bool metric_ok;
-    FlashMetrics(unsigned id_, unsigned activity_,
-                 double x_, double yb_, double zb_,
-                 double x_gl_, double y_, double z_,
-                 double xw_, double yw_, double zw_,
-                 double rr_, double ratio_, double slope_,
-                 double pe_, double unpe_, double time_,
+    FlashMetrics(double x_, double x_gl_, double y_, double yb_, double z_, double zb_,
+                 double rr_, double pe_, double unpe_, double ratio_, double time_,
                  double h_x_, double h_xerr_, double h_xrr_, double h_xratio_,
-                 double y_skew_, double z_skew_, double y_kurt_, double z_kurt_,
+                 double y_skew_, double z_skew_,
                  bool metric_ok_) :
-      id(id_), activity(activity_),
-      x(x_), yb(yb_), zb(zb_),
-      x_gl(x_gl_), y(y_), z(z_),
-      xw(xw_), yw(yw_),  zw(zw_),
-      rr(rr_), ratio(ratio_), slope(slope_),
-      pe(pe_), unpe(unpe_), time(time_),
+      x(x_), x_gl(x_gl_), y(y_), yb(yb_), z(z_), zb(zb_),
+      rr(rr_), pe(pe_), unpe(unpe_), ratio(ratio_), time(time_),
       h_x(h_x_), h_xerr(h_xerr_), h_xrr(h_xrr_), h_xratio(h_xratio_),
-      y_skew(y_skew_), z_skew(z_skew_), y_kurt(y_kurt_), z_kurt(z_kurt_),
+      y_skew(y_skew_), z_skew(z_skew_),
       metric_ok(metric_ok_)
       {}
     // faulty flashes constructor
     FlashMetrics() :
-      id(-1), activity(0), x(0.), yb(0.), zb(0.), x_gl(0.), y(0.), z(0.),
-      xw(0.), yw(0.), zw(0.),
-      rr(0.), ratio(0.), slope(0.),
-      pe(0.), unpe(0.), time(0.),
+      x(0.), x_gl(0.), y(0.), yb(0.), z(0.), zb(0.),
+      rr(0.), pe(0.), unpe(0.), ratio(0.), time(0.),
       h_x(0.), h_xerr(0.), h_xrr(0.), h_xratio(0.),
-      y_skew(0.), z_skew(0.), y_kurt(0.), z_kurt(0.),
+      y_skew(0.), z_skew(0.),
       metric_ok(false) {}
     std::string dumpMetrics() const
       {
         std::ostringstream stream;
         stream
-          << "  id:      " << id << "\n"
-          << "  activity:" << activity << "\n"
           << "  x:       " << x << "\n"
-          << "  yb:      " << yb << "\n"
-          << "  zb:      " << zb << "\n"
           << "  x_gl:    " << x_gl << "\n"
           << "  y:       " << y << "\n"
+          << "  yb:      " << yb << "\n"
           << "  z:       " << z << "\n"
-          << "  xw:      " << xw << "\n"
-          << "  yw:      " << yw << "\n"
-          << "  zw:      " << zw << "\n"
+          << "  zb:      " << zb << "\n"
           << "  rr:      " << rr << "\n"
-          << "  ratio:   " << ratio << "\n"
-          << "  slope:   " << slope << "\n"
           << "  pe:      " << pe << "\n"
           << "  unpe:    " << unpe << "\n"
+          << "  ratio:   " << ratio << "\n"
           << "  time:    " << time << "\n"
           << "  h_x:     " << h_x << "\n"
           << "  h_xerr:  " << h_xerr << "\n"
@@ -250,8 +187,6 @@ public:
           << "  h_xratio:" << h_xratio << "\n"
           << "  y_skew:  " << y_skew << "\n"
           << "  z_skew:  " << z_skew << "\n"
-          << "  y_kurt:  " << y_kurt << "\n"
-          << "  z_kurt:  " << z_kurt << "\n"
           << "  metric_ok: " << std::boolalpha << metric_ok << "\n";
         return stream.str();
       }
@@ -269,18 +204,17 @@ private:
   //  ::flashmatch::FlashMatchManager m_flashMatchManager; ///< The flash match manager
   // art::InputTag fFlashProducer;
   void initTree(void);
-  ReferenceMetrics loadMetrics(const std::string inputFilename) const;
-  std::tuple<double, bool> cheatMCT0_IsNu(
-    const std::vector<art::Ptr<recob::Hit>>& hits,
-    const std::vector<art::Ptr<simb::MCParticle>>& mcParticles) const;
+  void loadMetrics(void);
+  double cheatMCT0(const std::vector<art::Ptr<recob::Hit>>& hits,
+                   const std::vector<art::Ptr<simb::MCParticle>>& mcParticles);
   ChargeMetrics computeChargeMetrics(
-    const ChargeDigest& chargeDigest) const;
+    const flashmatch::QCluster_t& qClusters) const;
   FlashMetrics computeFlashMetrics(const SimpleFlash& simpleFlash) const;
   Score computeScore(const ChargeMetrics& charge,
-                     const FlashMetrics& flash) const;
-  Score computeScore3D(const ChargeMetrics& charge,
-                       const FlashMetrics& flash) const;
-  std::tuple<double, double, double, double> hypoFlashX_fits(// LEGACY
+                     const FlashMetrics& flash,
+                     const std::set<unsigned>& tpcWithHits,
+                     const int pdgc) const;
+  std::tuple<double, double, double, double> hypoFlashX_fits(
     double flash_rr, double flash_ratio) const;
   std::tuple<double, double, double, double> hypoFlashX_H2(
     double flash_rr, double flash_ratio) const;
@@ -293,7 +227,7 @@ private:
                     const art::Ptr<recob::PFParticle>& pfp_ptr,
                     const art::ValidHandle<std::vector<recob::PFParticle>>& pfps_h,
                     std::vector<art::Ptr<recob::PFParticle>>& pfp_v) const;
-  // unsigned trueNus(art::Event& evt) const; //LEGACY
+  unsigned trueNus(art::Event& evt) const;
   void updateChargeMetrics(const ChargeMetrics& chargeMetrics);
   void updateFlashMetrics(const FlashMetrics& flashMetrics);
   void updateScore(const Score& score);
@@ -301,16 +235,9 @@ private:
                           const double mean, const double spread) const;
   inline double scoreTerm(const double m,
                           const double mean, const double spread) const;
-  inline double scoreTerm3D(
-    const double m, const double n,
-    const int xb, const int yb, const int zb, const TProfile3D* prof3) const;
-  inline double scoreTerm3D(
-    const double m,
-    const int xb, const int yb, const int zb, const TProfile3D* prof3) const;
-  inline double PEToQ(const double pe, const double q) const;
   inline bool pfpNeutrinoOnEvent(
     const art::ValidHandle<std::vector<recob::PFParticle>>& pfps_h) const;
-  void copyOpHitsInFlashFindingWindow(
+  void copyOpHitsInBeamWindow(
     std::vector<recob::OpHit>& opHits,
     const art::Handle<std::vector<recob::OpHit>>& ophit_h) const;
   std::vector<SimpleFlash> makeSimpleFlashes(//SBND overload
@@ -336,26 +263,14 @@ private:
     std::unique_ptr<TH1D>& opHitsTimeHist) const;
   inline std::string detectorName(const std::string detName) const;
   bool isPDInCryo(const int pdChannel) const;
-  // bool isSBNDPDRelevant(const int pdChannel,
-  //                       const std::set<unsigned>& tpcWithHits) const;
+  bool isSBNDPDRelevant(const int pdChannel,
+                        const std::set<unsigned>& tpcWithHits) const;
   unsigned sbndPDinTPC(const int pdChannel) const;
   unsigned icarusPDinTPC(const int pdChannel) const;
-  double opHitTime(const recob::OpHit& oph) const;
   double wallXWithMaxPE(const OpHitIt opH_beg,
                         const OpHitIt opH_end) const;
-  double fractTimeWithFractionOfLight(
-    const SimpleFlash& simpleFlash,
-    const double sum_pe, const double fraction_pe,
-    const bool use_square_pe = false, const bool only_unpe = false) const;
-  inline double polynomialCorrection(const double skew, const double hypo_x,
-                                     const std::vector<double>& polCoefs,
-                                     const double skew_limit) const;
   std::list<double> wiresXGl() const;
-  unsigned timeBins() const;
   double driftDistance() const;
-  inline double driftCorrection(const double c_xb, const double f_time) const;
-  inline double xGlCorrection(const double c_x_glb, const double c_xb,
-                              const double f_time) const;
   double flashXGl(const double hypo_x, const double flash_x) const;
   double foldXGl(const double x_gl) const;
   unsigned driftVolume(const double x) const;
@@ -366,37 +281,36 @@ private:
   void printMetrics(const std::string metric,
                     const ChargeMetrics& charge,
                     const FlashMetrics& flash,
+                    const int pdgc,
+                    const std::set<unsigned>& tpcWithHits,
                     const double term,
                     Stream&& out) const;
 
   const art::InputTag fPandoraProducer, fSpacePointProducer,
     fOpHitProducer, fOpHitARAProducer;//, fCaloProducer, fTrackProducer;
-  const double fBeamSpillTimeStart, fBeamSpillTimeEnd;
-  const double fFlashFindingTimeStart, fFlashFindingTimeEnd;
+  detinfo::DetectorClocksData const fClockData;
+  const double fTickPeriod;
+  const double fBeamWindowStart, fBeamWindowEnd;
   const double fFlashStart, fFlashEnd;
   const unsigned fTimeBins;
   const bool fSelectNeutrino;
   const bool fOnlyCollectionWires;
   const bool fForceConcurrence;
-  const bool fUse3DMetrics;
-  const bool fCorrectDriftDistance;
-  // const bool fUseCalo; TODO: Use calorimetry
+  const bool fUseUncoatedPMT, fUseOppVolMetric;//, fUseCalo;
   const bool fUseARAPUCAS;
-  const bool fStoreMCInfo;
-  const ReferenceMetrics fRM;
+  const bool fStoreTrueNus;
+  const bool fStoreCheatMCT0;
+  const std::string fInputFilename;
   const bool fNoAvailableMetrics, fMakeTree;
   const double fChargeToNPhotonsShower, fChargeToNPhotonsTrack;
   const double fMinHitQ, fMinSpacePointQ, fMinParticleQ, fMinSliceQ;
-  const std::string fOpHitTime;
-  const bool fUseOpHitRiseTime, fUseOpHitPeakTime, fUseOpHitStartTime;
-  const unsigned fMinInTimeFlashes, fMaxFlashes;
-  const double fMinOpHPE, fMinFlashPE, fFlashPEFraction;
+  const unsigned fMaxFlashes;
+  const double fMinOpHPE, fMinFlashPE;
   const art::ServiceHandle<geo::Geometry> fGeometry;
   const std::string fDetector; // SBND or ICARUS
   const bool fSBND, fICARUS;
   const std::unique_ptr<opdet::PDMapAlg> fPDMapAlgPtr;
   const size_t fNTPC;
-  const unsigned fTPCPerDriftVolume;
   const int fCryostat;  // =0 or =1 to match ICARUS reco chain selection
   // geo::CryostatID fCryostat;  // TODO: use this type instead
   const std::unique_ptr<geo::CryostatGeo> fGeoCryo;
@@ -404,10 +318,12 @@ private:
   const double fDriftDistance;
   const int fXBins;
   const double fXBinWidth;
-  // const std::string fRR_TF1_fit, fRatio_TF1_fit; // LEGACY
+  const std::string fRR_TF1_fit, fRatio_TF1_fit;
   const unsigned fYBins,fZBins;
   const double fYLow, fYHigh, fZLow, fZHigh;
-  const double fSkewLimitY, fSkewLimitZ;
+  const double fYBiasSlope, fZBiasSlope;
+  unsigned fDriftVolumes;
+  unsigned fTPCPerDriftVolume;
   const unsigned fOpDetNormalizer;
   const double fTermThreshold;
 
@@ -418,30 +334,33 @@ private:
   static constexpr unsigned kActivityInLeft = 200;
   static constexpr unsigned kActivityInBoth = 300;
 
-  // Tree variables
+  // root stuff
   TTree* _flashmatch_nuslice_tree;
-  unsigned _charge_id, _charge_activity;
-  int _charge_pdgc;
-  double _charge_x_gl, _charge_x, _charge_y, _charge_z,
-    _charge_x_glw, _charge_yw, _charge_zw, _charge_slope, _charge_q;
-  unsigned _flash_id, _flash_activity;
-  double _flash_x, _flash_yb, _flash_zb,
-    _flash_x_gl, _flash_y, _flash_z,
-    _flash_xw, _flash_yw, _flash_zw,
-    _flash_rr, _flash_ratio, _flash_slope,
-    _flash_pe, _flash_unpe, _flash_time,
-    _hypo_x, _hypo_x_err, _hypo_x_rr, _hypo_x_ratio,
-    _y_skew, _z_skew, _y_kurt, _z_kurt;
-  double _petoq;
-  double _score, _scr_y, _scr_z, _scr_rr, _scr_ratio,
-    _scr_slope, _scr_petoq;
-  unsigned _evt, _run, _sub;
-  unsigned _slices = -1; unsigned _is_nu = -1;
-  double _mcT0 = -9999.;
-
+  struct Fits {
+    double min, max;
+    std::unique_ptr<TF1> f;
+  };
+  TH2D* fRRH2; TH2D* fRatioH2;
   static constexpr unsigned kMinEntriesInProjection = 100;
+  std::array<Fits, 3> fRRFits;
+  std::array<Fits, 3> fRatioFits;
   const std::array<std::string, 3> kSuffixes{"l", "h", "m"};// low, high, medium
   static constexpr double kEps = 1e-4;
+
+  // Tree variables
+  double _charge_x_gl, _charge_x,
+    _charge_y, _charge_z, _charge_q;
+  double _flash_x, _flash_x_gl, _flash_y, _flash_yb, _flash_z, _flash_zb,
+    _flash_rr, _flash_pe, _flash_unpe, _flash_ratio, _flash_time,
+    _hypo_x, _hypo_x_err, _hypo_x_rr, _hypo_x_ratio,
+    _y_skew, _z_skew;
+  double _score, _scr_y, _scr_z, _scr_rr, _scr_ratio;
+  unsigned _evt, _run, _sub;
+  unsigned _slices = -1; unsigned _true_nus = -1;
+  double _mcT0 = -9999.;
+
+  std::vector<double> fdYMeans, fdZMeans, fRRMeans, fRatioMeans;
+  std::vector<double> fdYSpreads, fdZSpreads, fRRSpreads, fRatioSpreads;
 
   static constexpr bool kNoScr = false;
   static constexpr double kNoScrTime = -9999.;
