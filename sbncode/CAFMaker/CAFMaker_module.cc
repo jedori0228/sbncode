@@ -1286,12 +1286,6 @@ void CAFMaker::produce(art::Event& evt) noexcept {
     for (unsigned i = 0; i < crthits.size(); i++) {
       srcrthits.emplace_back();
       FillCRTHit(crthits[i], fParams.CRTUseTS0(), srcrthits.back());
-
-      if(isRealData){
-        //std::cout << "srcrthits.back().t1 = " << srcrthits.back().t1 << ", srtrigger.trigger_within_gate/1000. = " << srtrigger.trigger_within_gate/1000. << std::endl;
-        srcrthits.back().t1 += srtrigger.trigger_within_gate;
-      }
-
     }
   }
 
