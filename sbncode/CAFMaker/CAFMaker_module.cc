@@ -88,6 +88,7 @@
 #include "lardataobj/RecoBase/Vertex.h"
 #include "lardataobj/RecoBase/Shower.h"
 #include "lardataobj/RecoBase/MCSFitResult.h"
+#include "lardataobj/RecoBase/OpHit.h"
 
 #include "nusimdata/SimulationBase/MCFlux.h"
 #include "nusimdata/SimulationBase/MCTruth.h"
@@ -442,16 +443,19 @@ void CAFMaker::FixCRTReferenceTimes(StandardRecord &rec, double CRT_reference_ti
   // Fix the hits
   for (SRCRTHit &h: rec.crt_hits) {
     h.time += CRT_reference_time;
+    h.t0 += CRT_reference_time;
   }
 
   // Fix the hit matches
   for (SRSlice &s: rec.slc) {
     for (SRPFP &pfp: s.reco.pfp) {
       pfp.trk.crthit.hit.time += CRT_reference_time;
+      pfp.trk.crthit.hit.t0 += CRT_reference_time;
     }
   }
   for (SRPFP &pfp: rec.reco.pfp) {
     pfp.trk.crthit.hit.time += CRT_reference_time;
+    pfp.trk.crthit.hit.t0 += CRT_reference_time;
   }
 
   // TODO: fix more?
@@ -1282,6 +1286,12 @@ void CAFMaker::produce(art::Event& evt) noexcept {
     for (unsigned i = 0; i < crthits.size(); i++) {
       srcrthits.emplace_back();
       FillCRTHit(crthits[i], fParams.CRTUseTS0(), srcrthits.back());
+
+      if(isRealData){
+        //std::cout << "srcrthits.back().t1 = " << srcrthits.back().t1 << ", srtrigger.trigger_within_gate/1000. = " << srtrigger.trigger_within_gate/1000. << std::endl;
+        srcrthits.back().t1 += srtrigger.trigger_within_gate;
+      }
+
     }
   }
 
@@ -1309,9 +1319,43 @@ void CAFMaker::produce(art::Event& evt) noexcept {
     if (flashes_handle.isValid()) {
       const std::vector<recob::OpFlash> &opflashes = *flashes_handle;
       int cryostat = ( pandora_tag_suffix.find("W") != std::string::npos ) ? 1 : 0;
+
+      //==== get associated OpHits for each OpFlash
+      art::FindManyP<recob::OpHit> findManyHits(flashes_handle, evt, fParams.OpFlashLabel() + pandora_tag_suffix);
+
+      int iflash=0;
       for (const recob::OpFlash& flash : opflashes) {
+
+        std::vector<art::Ptr<recob::OpHit>> ophits = findManyHits.at(iflash);
+
         srflashes.emplace_back();
         FillOpFlash(flash, cryostat, srflashes.back());
+
+        //std::cout << "[JSKIMDEBUG][CAFMaker::produce()] @@ Printing OpFlash info" << std::endl;
+        //std::cout << "[JSKIMDEBUG][CAFMaker::produce()] OpFlash.Time() = " << flash.Time() << std::endl;
+
+        double firstTime = 999999;
+        for(const auto& ophit: ophits){
+          if (firstTime > ophit->PeakTime())
+            firstTime = ophit->PeakTime();
+        }
+        //std::cout << "[JSKIMDEBUG][CAFMaker::produce()] First time = " << firstTime << std::endl;
+        //std::cout << "[JSKIMDEBUG][CAFMaker::produce()] Last time  = " << lastTime << std::endl;
+        //std::cout << "[JSKIMDEBUG][CAFMaker::produce()] OpFlashWidth = " << lastTime-firstTime << std::endl;
+        srflashes.back().firsttime = firstTime;
+        //std::cout << "[JSKIMDEBUG][CAFMaker::produce()] Time-FirstTime = " << 1000*(srflashes.back().time-srflashes.back().firsttime) << std::endl;
+
+        int nOpHitsTriggering = 0;
+        for(const auto& ophit: ophits){
+          //==== to emulate majority5
+          double this_amp = ophit->Amplitude();
+          if(this_amp<400) continue;
+          nOpHitsTriggering++;
+        }
+        srflashes.back().onbeamtime = (nOpHitsTriggering>=5);
+
+        iflash++;
+
       }
     }
   }
