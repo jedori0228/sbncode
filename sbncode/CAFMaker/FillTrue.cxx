@@ -9,7 +9,7 @@
 // helper function declarations
 
 caf::SRTrackTruth MatchTrack2Truth(const detinfo::DetectorClocksData &clockData, const std::vector<caf::SRTrueParticle> &particles, const std::vector<art::Ptr<recob::Hit>> &hits,
-				   const std::map<int, caf::HitsEnergy> &all_hits_map);
+           const std::map<int, caf::HitsEnergy> &all_hits_map);
 
 caf::SRTruthMatch MatchSlice2Truth(const std::vector<art::Ptr<recob::Hit>> &hits,
                                    const std::vector<art::Ptr<simb::MCTruth>> &neutrinos,
@@ -253,6 +253,32 @@ namespace caf {
     }
   }//FillSliceFakeReco
 
+  //-----------------------------------------------
+  void FillGHEPParticle(const art::Ptr<simb::MCTruth> mctruth,
+        caf::SRTrueInteraction &srneutrino){
+        // std::vector<caf::SRTrueParticle> &srparticles){
+
+    const int nptl = mctruth->NParticles();
+    std::vector<caf::SRTrueParticle> ghep_ptls;
+    for(int i_ptl=0; i_ptl<nptl; i_ptl++){
+      const auto& particle = mctruth->GetParticle(i_ptl);
+
+      srneutrino.ghepptl.emplace_back();
+      caf::SRTrueParticle& srparticle = srneutrino.ghepptl.back();
+
+      srparticle.pdg = particle.PdgCode();
+
+      srparticle.genp = caf::SRVector3D(particle.Px(), particle.Py(), particle.Pz() );
+      srparticle.genE = particle.E();
+
+      srparticle.parent = particle.Mother();
+      srparticle.gstatus = (caf::genie_status_)particle.StatusCode();
+
+    }
+
+    srneutrino.nghepptl = srneutrino.ghepptl.size();
+
+  }
 
   //------------------------------------------------
   void FillTrueNeutrino(const art::Ptr<simb::MCTruth> mctruth,
@@ -405,6 +431,9 @@ namespace caf {
           break;
         }
       }
+
+      FillGHEPParticle(mctruth, srneutrino);
+
     }
 
   }
@@ -1277,7 +1306,7 @@ float ContainedLength(const TVector3 &v0, const TVector3 &v1,
 
 //------------------------------------------------
 caf::SRTrackTruth MatchTrack2Truth(const detinfo::DetectorClocksData &clockData, const std::vector<caf::SRTrueParticle> &particles, const std::vector<art::Ptr<recob::Hit>> &hits,
-				   const std::map<int, caf::HitsEnergy> &all_hits_map) {
+           const std::map<int, caf::HitsEnergy> &all_hits_map) {
 
   art::ServiceHandle<cheat::BackTrackerService> bt_serv;
 

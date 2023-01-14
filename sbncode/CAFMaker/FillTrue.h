@@ -85,6 +85,9 @@ namespace caf
                         const std::vector<geo::BoxBoundedGeo> &active_volumes,
                         caf::SRMeVPrtl &srtruth);
 
+  void FillGHEPParticle(const art::Ptr<simb::MCTruth> mctruth,
+        std::vector<caf::SRTrueParticle> &srparticles);
+
   void FillTrueNeutrino(const art::Ptr<simb::MCTruth> mctruth, 
 			const simb::MCFlux &mcflux, 
                         const simb::GTruth& gtruth,
